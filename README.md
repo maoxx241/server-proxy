@@ -7,6 +7,7 @@
 - **场景**: 服务器没有外网访问权限，但本机有 Clash 代理
 - **方案**: 使用 FRP 内网穿透，将本机 Clash 代理端口映射到服务器
 - **效果**: 服务器上的应用可以通过代理访问外网（如 GitHub、Google 等）
+- **扩展**: 支持自定义 SSH 端口，支持 Docker 容器内使用代理
 
 ## 前置条件
 
@@ -17,9 +18,10 @@
 
 ### Linux 服务器
 1. IP 地址: `173.125.1.2`（如需修改见下文）
-2. SSH 端口: `22`
+2. SSH 端口: `22`（支持自定义端口，如 2222）
 3. 用户名: `root`（或有 sudo 权限的用户）
 4. **已通过 SSH 密钥配置免密登录**（重要！）
+5. 如有 Docker 容器，也可配置容器内代理
 
 ### 网络要求
 - Windows 可以 SSH 连接到 Linux 服务器
@@ -37,11 +39,14 @@
 # 生成密钥（一路回车）
 ssh-keygen -t ed25519 -C "your_email@example.com"
 
-# 复制公钥到服务器
+# 复制公钥到服务器（默认端口 22）
 ssh-copy-id -p 22 root@173.125.1.2
 
+# 如果服务器使用非标准端口（如 2222）
+ssh-copy-id -p 2222 root@173.125.1.2
+
 # 测试免密登录
-ssh root@173.125.1.2
+ssh -p 22 root@173.125.1.2
 # 如果不需要输入密码就登录成功，说明配置正确
 ```
 
@@ -62,8 +67,11 @@ cd C:\Users\maoxx241\code\server-proxy
 # 查看帮助
 .\setup.ps1
 
-# 首次部署（安装服务端）
+# 首次部署（默认 SSH 端口 22）
 .\setup.ps1 -Action deploy
+
+# 如果服务器使用非标准 SSH 端口（如 2222）
+.\setup.ps1 -Action deploy -ServerPort 2222
 ```
 
 部署过程约 1-3 分钟，会自动：
@@ -78,7 +86,11 @@ cd C:\Users\maoxx241\code\server-proxy
 在 `server-proxy` 目录下执行：
 
 ```powershell
+# 默认端口
 .\setup.ps1 -Action start
+
+# 如果使用非标准 SSH 端口，查看状态时需指定
+.\setup.ps1 -Action status -ServerPort 2222
 ```
 
 启动成功后，Windows 任务管理器中应能看到 `frpc.exe` 进程。
@@ -99,6 +111,35 @@ curl ipinfo.io  # 查看出口IP
 source /opt/proxy-tools/unset-proxy.sh
 ```
 
+## Docker 容器代理（可选）
+
+如果服务器上运行着 Docker 容器，可以为容器配置代理：
+
+```powershell
+# 配置容器代理（在 Windows 上执行）
+.\setup.ps1 -Action docker -ContainerName myapp -ServerPort 2222
+
+# 多个容器需要分别配置
+.\setup.ps1 -Action docker -ContainerName app1
+.\setup.ps1 -Action docker -ContainerName app2
+```
+
+然后在容器内使用：
+
+```bash
+# 进入容器
+docker exec -it myapp sh
+
+# 启用代理
+set-proxy
+
+# 测试
+curl https://www.google.com
+
+# 关闭代理
+unset-proxy
+```
+
 ## 常用命令
 
 ### Windows 本机（在 server-proxy 目录下执行）
@@ -107,18 +148,28 @@ source /opt/proxy-tools/unset-proxy.sh
 # 查看所有命令
 .\setup.ps1
 
-# 部署到服务器（首次或更新配置后）
-.\setup.ps1 -Action deploy
+# 基础命令（默认 SSH 端口 22）
+.\setup.ps1 -Action deploy     # 部署到服务器
+.\setup.ps1 -Action start      # 启动 frp 客户端
+.\setup.ps1 -Action stop       # 停止 frp 客户端
+.\setup.ps1 -Action status     # 查看运行状态
 
-# 启动 frp 客户端
-.\setup.ps1 -Action start
+# 自定义 SSH 端口（如 2222）
+.\setup.ps1 -Action deploy -ServerPort 2222
+.\setup.ps1 -Action status -ServerPort 2222
 
-# 停止 frp 客户端
-.\setup.ps1 -Action stop
-
-# 查看运行状态
-.\setup.ps1 -Action status
+# Docker 容器代理
+.\setup.ps1 -Action docker -ContainerName <容器名> -ServerPort 2222
 ```
+
+### 参数说明
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `-ServerIP` | 173.125.1.2 | 服务器 IP 地址 |
+| `-ServerUser` | root | SSH 用户名 |
+| `-ServerPort` | 22 | SSH 端口 |
+| `-ContainerName` | (无) | Docker 容器名称 |
 
 ### Linux 服务器
 
@@ -144,17 +195,28 @@ sudo systemctl restart frps
 # 密码: admin123
 ```
 
-## 修改服务器 IP
+## 修改服务器 IP 或端口
 
-如果服务器 IP 不是 `173.125.1.2`，需要修改以下文件：
+### 修改服务器 IP
 
-1. 修改 `server-proxy\frpc.toml` 中的 `serverAddr`
-2. 修改 `server-proxy\deploy\proxy-tools\set-proxy.sh` 中的 `PROXY_HOST`
-3. 重新部署:
+编辑 `server-proxy\frpc.toml`：
+```toml
+serverAddr = "新的IP地址"
+```
 
+然后重新部署：
 ```powershell
 cd C:\Users\maoxx241\code\server-proxy
-.\setup.ps1 -Action deploy
+.\setup.ps1 -Action deploy -ServerPort 2222
+```
+
+### 修改 SSH 端口
+
+所有命令都支持 `-ServerPort` 参数：
+```powershell
+.\setup.ps1 -Action deploy -ServerPort 2222
+.\setup.ps1 -Action status -ServerPort 2222
+.\setup.ps1 -Action docker -ContainerName myapp -ServerPort 2222
 ```
 
 ## 故障排查
@@ -165,11 +227,14 @@ cd C:\Users\maoxx241\code\server-proxy
 
 **排查**:
 ```powershell
-# 测试 SSH 连接
-ssh root@173.125.1.2
+# 测试 SSH 连接（默认端口 22）
+ssh -p 22 root@173.125.1.2
+
+# 或使用非标准端口
+ssh -p 2222 root@173.125.1.2
 
 # 如果要求输入密码，说明免密登录未配置成功
-# 重新执行: ssh-copy-id root@173.125.1.2
+# 重新执行: ssh-copy-id -p 2222 root@173.125.1.2
 ```
 
 ### 2. frpc 启动失败
@@ -178,8 +243,8 @@ ssh root@173.125.1.2
 
 **排查**（在 `server-proxy` 目录下）:
 ```powershell
-# 检查服务器 frps 是否运行
-ssh root@173.125.1.2 "systemctl status frps"
+# 检查服务器 frps 是否运行（注意指定端口）
+ssh -p 2222 root@173.125.1.2 "systemctl status frps"
 
 # 检查端口是否可连接
 Test-NetConnection -ComputerName 173.125.1.2 -Port 7000
@@ -205,7 +270,24 @@ sudo firewall-cmd --list-ports
 # 应包含: 7000/tcp 7897/tcp 7898/tcp
 ```
 
-### 4. 下载 frp 失败
+### 4. Docker 容器代理不生效
+
+**现象**: 容器内执行 `set-proxy` 后仍无法访问外网
+
+**排查**:
+```bash
+# 检查容器内代理脚本是否存在
+docker exec myapp ls -la /usr/local/bin/set-proxy
+
+# 检查容器是否能访问宿主机代理端口
+docker exec myapp wget -O- http://173.125.1.2:7897
+
+# 重新配置容器代理
+# 在 Windows 上重新执行:
+# .\setup.ps1 -Action docker -ContainerName myapp -ServerPort 2222
+```
+
+### 5. 下载 frp 失败
 
 **现象**: 部署时下载卡住或失败
 
@@ -226,11 +308,7 @@ server-proxy/                    <-- 在此目录下执行所有命令
 ├── start-frpc.vbs               # 后台启动脚本
 ├── README.md                    # 本文件
 └── deploy/
-    ├── deploy.ps1               # 服务器部署脚本
-    └── proxy-tools/             # 服务器端代理脚本
-        ├── set-proxy.sh         # 启用代理
-        ├── unset-proxy.sh       # 关闭代理
-        └── check-proxy.sh       # 检查状态
+    └── deploy.ps1               # 服务器部署脚本
 ```
 
 ## 注意事项
@@ -240,6 +318,7 @@ server-proxy/                    <-- 在此目录下执行所有命令
 3. **防火墙**: 服务器需要开放 7000、7897、7898、7500 端口
 4. **代理范围**: 代理仅对当前终端会话有效，不会全局生效
 5. **执行目录**: 所有 Windows 命令需在 `server-proxy` 目录下执行
+6. **SSH 端口**: 使用非标准端口时，所有命令都需加 `-ServerPort` 参数
 
 ## 进阶配置
 
@@ -252,7 +331,7 @@ webServer.password = "admin123"
 修改后重新部署：
 ```powershell
 cd C:\Users\maoxx241\code\server-proxy
-.\setup.ps1 -Action deploy
+.\setup.ps1 -Action deploy -ServerPort 2222
 ```
 
 ### 使用其他代理端口
@@ -296,5 +375,6 @@ sudo firewall-cmd --reload
 如有问题，请检查：
 1. 所有前置条件是否满足
 2. 确认在 `server-proxy` 目录下执行命令
-3. 按照 "故障排查" 章节逐步排查
-4. 查看日志：`frpc.log` 或服务器 `/var/log/frps.log`
+3. 如使用非标准 SSH 端口，确认所有命令都加了 `-ServerPort` 参数
+4. 按照 "故障排查" 章节逐步排查
+5. 查看日志：`frpc.log` 或服务器 `/var/log/frps.log`
