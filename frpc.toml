@@ -1,0 +1,35 @@
+# FRP Client Config for Windows
+# Server IP: 173.125.1.2
+
+serverAddr = "173.125.1.2"
+serverPort = 7000
+
+log.to = "./frpc.log"
+log.level = "info"
+log.maxDays = 7
+
+transport.tcpMux = true
+transport.tcpMuxKeepaliveInterval = 30
+transport.heartbeatInterval = 30
+transport.heartbeatTimeout = 90
+
+# Enable KCP if network is unstable
+# transport.protocol = "kcp"
+
+# Auth token (optional)
+# auth.method = "token"
+# auth.token = "your_token"
+
+[[proxies]]
+name = "clash-http"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 7897
+remotePort = 7897
+
+[[proxies]]
+name = "clash-socks5"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 7898
+remotePort = 7898
