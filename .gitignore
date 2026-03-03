@@ -1,5 +1,14 @@
-﻿.tunnel-mapping
+# Temporary files
+.tunnel-mapping
 *.pid
 *.log
 .DS_Store
 Thumbs.db
+
+# FRP binaries (downloaded during setup)
+frp/*.exe
+frp/*.toml
+frp/LICENSE
+
+# PowerShell temp files
+*.tmp

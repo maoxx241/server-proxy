@@ -1,256 +1,300 @@
-# Proxy Tunnel - 智能端口管理版
+# FRP 代理共享工具
 
-一台 Windows 给多台 Linux 服务器共享代理。自动端口管理，智能问题检测。
+将 Windows 本机的 Clash 代理共享给远端 Linux 服务器使用。
 
----
+## 功能简介
 
-## 特点
+- **场景**: 服务器没有外网访问权限，但本机有 Clash 代理
+- **方案**: 使用 FRP 内网穿透，将本机 Clash 代理端口映射到服务器
+- **效果**: 服务器上的应用可以通过代理访问外网（如 GitHub、Google 等）
 
-- ✅ **智能端口清理** - 启动前自动检测并清理服务器上的旧隧道
-- ✅ **预飞行检查** - 服务器启用代理前检查端口是否就绪
-- ✅ **自动故障诊断** - 端口不通时自动给出解决方案
-- ✅ **配置即文档** - `config.yaml` 自动记录每台服务器的实际端口
-- ✅ **多源检测** - 支持 `.tunnel-mapping` 或 `config.yaml` 两种方式
+## 前置条件
 
----
+### Windows 本机
+1. 已安装 **Clash for Windows** 或其他代理软件
+2. Clash HTTP 代理端口为 **7897**（可在 Clash 设置中确认）
+3. 已安装 **Git for Windows**（提供 SSH 客户端）
 
-## 使用流程
+### Linux 服务器
+1. IP 地址: `173.125.1.2`（如需修改见下文）
+2. SSH 端口: `22`
+3. 用户名: `root`（或有 sudo 权限的用户）
+4. **已通过 SSH 密钥配置免密登录**（重要！）
 
-### 1. 配置（Windows）
+### 网络要求
+- Windows 可以 SSH 连接到 Linux 服务器
+- Linux 服务器可以访问 Windows 的 Clash 代理端口（通过 FRP 隧道）
 
-编辑 `config.yaml`，填入服务器列表：
+## 快速开始
 
-```yaml
-servers:
-  - name: server-1
-    host: 173.125.1.2
-    user: root
-    port: 22
-  
-  - name: server-2
-    host: 192.168.1.100
-    user: root
-    port: 22
+假设项目已克隆/解压到 `C:\Users\maoxx241\code\server-proxy` 目录。
 
-proxy:
-  local_proxy_port: 7897      # Windows 代理软件端口
-  base_tunnel_port: 11080     # 起始端口（程序从此开始找可用端口）
-```
+### 第一步：配置 SSH 免密登录
 
-**注意**：确保 Windows 能用公钥登录这些服务器。
-
----
-
-### 2. 启动服务（Windows）
+如果还没有配置 SSH 密钥，请在 **PowerShell** 中执行：
 
 ```powershell
-# 启动所有隧道（自动清理旧隧道、检测端口）
-.\proxy.ps1 start
+# 生成密钥（一路回车）
+ssh-keygen -t ed25519 -C "your_email@example.com"
 
-# 查看状态
-.\proxy.ps1 status
+# 复制公钥到服务器
+ssh-copy-id -p 22 root@173.125.1.2
 
-# 仅清理服务器上的旧隧道（修复模式）
-.\proxy.ps1 fix
-
-# 停止所有隧道
-.\proxy.ps1 stop
+# 测试免密登录
+ssh root@173.125.1.2
+# 如果不需要输入密码就登录成功，说明配置正确
 ```
 
-启动时会：
-1. 检测并清理服务器上的旧 SSH 隧道
-2. 自动找到可用的端口
-3. 启动新的 SSH 隧道
-4. 生成 `.tunnel-mapping` 文件
-5. 更新 `config.yaml` 记录分配的端口
+### 第二步：确保 Clash 运行
 
----
+打开 Clash 客户端，确认：
+- 状态为 "运行中"
+- HTTP 代理端口为 7897（可在 设置 > 端口 中查看）
 
-### 3. 使用代理（Linux 服务器）
+### 第三步：一键部署
 
-把整个 `proxy` 文件夹传到服务器：
+在 `server-proxy` 目录下执行：
+
+```powershell
+# 进入项目目录
+cd C:\Users\maoxx241\code\server-proxy
+
+# 查看帮助
+.\setup.ps1
+
+# 首次部署（安装服务端）
+.\setup.ps1 -Action deploy
+```
+
+部署过程约 1-3 分钟，会自动：
+1. 检测服务器架构
+2. 下载对应版本的 FRP
+3. 上传到服务器并安装
+4. 配置防火墙规则
+5. 启动 frp 服务
+
+### 第四步：启动 Windows 客户端
+
+在 `server-proxy` 目录下执行：
+
+```powershell
+.\setup.ps1 -Action start
+```
+
+启动成功后，Windows 任务管理器中应能看到 `frpc.exe` 进程。
+
+### 第五步：在服务器上使用代理
+
+SSH 登录到服务器，执行：
 
 ```bash
-# Windows PowerShell
-scp -r proxy root@173.125.1.2:/home/m00663269/
+# 启用代理
+source /opt/proxy-tools/set-proxy.sh
+
+# 测试代理是否生效
+curl -I https://www.google.com
+curl ipinfo.io  # 查看出口IP
+
+# 关闭代理
+source /opt/proxy-tools/unset-proxy.sh
 ```
 
-SSH 登录服务器：
+## 常用命令
 
-```bash
-cd /home/m00663269/proxy
+### Windows 本机（在 server-proxy 目录下执行）
 
-# 检查端口是否就绪（可选）
-source proxy.sh check
+```powershell
+# 查看所有命令
+.\setup.ps1
 
-# 启用代理（会自动检查端口，失败会提示）
-source proxy.sh on
+# 部署到服务器（首次或更新配置后）
+.\setup.ps1 -Action deploy
 
-# 测试连接
-source proxy.sh test
+# 启动 frp 客户端
+.\setup.ps1 -Action start
+
+# 停止 frp 客户端
+.\setup.ps1 -Action stop
+
+# 查看运行状态
+.\setup.ps1 -Action status
 ```
-
----
-
-## 命令速查
-
-### Windows
-
-| 命令 | 作用 |
-|-----|------|
-| `proxy.ps1 start` | 启动隧道（自动清理旧隧道） |
-| `proxy.ps1 fix` | 仅清理服务器上的旧隧道 |
-| `proxy.ps1 stop` | 停止所有隧道 |
-| `proxy.ps1 status` | 查看运行状态 |
 
 ### Linux 服务器
 
-| 命令 | 作用 |
-|-----|------|
-| `source proxy.sh on` | 启用代理（带预飞行检查） |
-| `source proxy.sh off` | 关闭代理 |
-| `source proxy.sh check` | 检查端口是否就绪 |
-| `source proxy.sh test` | 测试连接（Google/GitHub/Baidu） |
-| `source proxy.sh status` | 查看状态 |
+```bash
+# 启用代理（仅对当前终端会话有效）
+source /opt/proxy-tools/set-proxy.sh
 
----
+# 检查代理状态
+/opt/proxy-tools/check-proxy.sh
 
-## 智能端口管理
+# 关闭代理
+source /opt/proxy-tools/unset-proxy.sh
 
-### 启动时自动清理
+# 查看 frp 服务状态
+sudo systemctl status frps
+
+# 重启 frp 服务
+sudo systemctl restart frps
+
+# 查看 frp 面板（浏览器访问）
+# http://173.125.1.2:7500
+# 用户名: admin
+# 密码: admin123
+```
+
+## 修改服务器 IP
+
+如果服务器 IP 不是 `173.125.1.2`，需要修改以下文件：
+
+1. 修改 `server-proxy\frpc.toml` 中的 `serverAddr`
+2. 修改 `server-proxy\deploy\proxy-tools\set-proxy.sh` 中的 `PROXY_HOST`
+3. 重新部署:
 
 ```powershell
-.\proxy.ps1 start
-
-# 输出：
-# [INFO] Checking port 11080 on 173.125.1.2...
-# [WARN] Port 11080 is occupied on server
-# [OK] Port 11080 cleared on server
-# [OK] Tunnel started
+cd C:\Users\maoxx241\code\server-proxy
+.\setup.ps1 -Action deploy
 ```
 
-### 服务器启用前检查
+## 故障排查
 
-```bash
-source proxy.sh on
+### 1. SSH 连接失败
 
-# 输出：
-# === Server Auto-Configuration ===
-# Server IP:    173.125.1.2
-# Tunnel Port:  11080
-#
-# Checking port connectivity...
-#   ✓ Port 11080 is ready
-#
-# ✓ Proxy enabled
-```
+**现象**: 部署时报 "SSH 连接失败"
 
-如果端口有问题：
-```bash
-source proxy.sh on
-
-# Checking port connectivity...
-#   ✗ Port 11080 is not accessible
-#
-# === Port Diagnostics ===
-# Port 11080 is not listening
-#
-# Common solutions:
-#   1. On Windows: Run: .\proxy.ps1 start
-#   2. On Windows: Run: .\proxy.ps1 fix
-```
-
----
-
-## 常见问题自动解决
-
-### 问题 1：服务器端口被旧隧道占用
-
-**现象：**
-```
-remote port forwarding failed for listen port 11080
-```
-
-**解决（已自动化）：**
+**排查**:
 ```powershell
-# Windows 会自动检测并清理
-.\proxy.ps1 start
+# 测试 SSH 连接
+ssh root@173.125.1.2
 
-# 或手动清理
-.\proxy.ps1 fix
+# 如果要求输入密码，说明免密登录未配置成功
+# 重新执行: ssh-copy-id root@173.125.1.2
 ```
 
-### 问题 2：服务器启动代理时端口不通
+### 2. frpc 启动失败
 
-**现象：**
-```
-✗ Port 11080 is not accessible
+**现象**: "frpc 启动失败"
+
+**排查**（在 `server-proxy` 目录下）:
+```powershell
+# 检查服务器 frps 是否运行
+ssh root@173.125.1.2 "systemctl status frps"
+
+# 检查端口是否可连接
+Test-NetConnection -ComputerName 173.125.1.2 -Port 7000
+
+# 手动启动查看错误
+.\frp\frpc.exe -c frpc.toml
 ```
 
-**解决：**
+### 3. 代理不生效
+
+**现象**: `curl google.com` 失败
+
+**排查**:
 ```bash
-# 服务器检查端口状态
-source proxy.sh check
+# 在服务器上检查代理环境变量
+echo $http_proxy
 
-# 根据提示在 Windows 上执行修复
-.\proxy.ps1 fix
-# 或
-.\proxy.ps1 start
+# 检查 frp 端口是否监听
+ss -tlnp | grep frps
+
+# 检查防火墙
+sudo firewall-cmd --list-ports
+# 应包含: 7000/tcp 7897/tcp 7898/tcp
 ```
 
-### 问题 3：Windows 换行符导致脚本无法执行
+### 4. 下载 frp 失败
 
-**现象：**
+**现象**: 部署时下载卡住或失败
+
+**解决**:
+- 确保 Clash 正常运行
+- 尝试切换 Clash 节点
+- 手动下载后放到 `server-proxy\frp\` 目录
+
+## 项目结构
+
 ```
--bash: $'': command not found
+server-proxy/                    <-- 在此目录下执行所有命令
+├── frp/                         # FRP 客户端程序
+│   └── frpc.exe                # Windows 客户端
+├── frpc.toml                    # 客户端配置
+├── setup.ps1                    # 主控脚本（一键操作）
+├── start-frpc.bat               # 传统启动脚本
+├── start-frpc.vbs               # 后台启动脚本
+├── README.md                    # 本文件
+└── deploy/
+    ├── deploy.ps1               # 服务器部署脚本
+    └── proxy-tools/             # 服务器端代理脚本
+        ├── set-proxy.sh         # 启用代理
+        ├── unset-proxy.sh       # 关闭代理
+        └── check-proxy.sh       # 检查状态
 ```
 
-**解决：**
-Windows 上传时已自动转换。如果仍有问题，在服务器上执行：
+## 注意事项
+
+1. **安全性**: 默认面板密码为 `admin123`，生产环境请修改
+2. **端口占用**: 确保 Windows 7897/7898 端口未被占用
+3. **防火墙**: 服务器需要开放 7000、7897、7898、7500 端口
+4. **代理范围**: 代理仅对当前终端会话有效，不会全局生效
+5. **执行目录**: 所有 Windows 命令需在 `server-proxy` 目录下执行
+
+## 进阶配置
+
+### 修改面板密码
+
+编辑 `server-proxy\deploy\deploy.ps1`，找到：
+```powershell
+webServer.password = "admin123"
+```
+修改后重新部署：
+```powershell
+cd C:\Users\maoxx241\code\server-proxy
+.\setup.ps1 -Action deploy
+```
+
+### 使用其他代理端口
+
+如果 Clash 代理端口不是 7897：
+
+1. 修改 `server-proxy\frpc.toml` 中的 `localPort`
+2. 修改 `server-proxy\setup.ps1` 中的 `$LocalProxyPort`
+3. 重新部署
+
+## 卸载
+
+Windows 本机（在 `server-proxy` 目录下）:
+```powershell
+# 停止 frpc
+.\setup.ps1 -Action stop
+
+# 删除项目文件夹即可
+```
+
+Linux 服务器:
 ```bash
-sed -i 's/\r$//' proxy.sh
+# 停止并删除服务
+sudo systemctl stop frps
+sudo systemctl disable frps
+sudo rm -f /etc/systemd/system/frps.service
+
+# 删除文件
+sudo rm -rf /opt/frp
+sudo rm -rf /opt/proxy-tools
+
+# 关闭防火墙端口
+sudo firewall-cmd --permanent --remove-port=7000/tcp
+sudo firewall-cmd --permanent --remove-port=7897/tcp
+sudo firewall-cmd --permanent --remove-port=7898/tcp
+sudo firewall-cmd --reload
 ```
 
----
+## 技术支持
 
-## 查看分配的端口
-
-启动后，查看 `config.yaml`：
-
-```yaml
-servers:
-  - name: server-1
-    host: 173.125.1.2
-    assigned_tunnel_port: 11082  # 实际分配的端口
-```
-
-或查看 `.tunnel-mapping`：
-```
-173.125.1.2 11082
-192.168.1.100 11083
-```
-
----
-
-## 不同代理软件配置
-
-| 代理软件 | 默认端口 | config.yaml 设置 |
-|---------|---------|-----------------|
-| Clash Verge | 7890/7897 | `local_proxy_port: 7897` |
-| v2rayN | 10808 | `local_proxy_port: 10808` |
-| SSR | 1080 | `local_proxy_port: 1080` |
-
----
-
-## 文件说明
-
-| 文件 | 说明 | 人需要改？ |
-|-----|------|----------|
-| `config.yaml` | 主配置（含自动分配的端口） | ✅ 初始化时填服务器 |
-| `proxy.ps1` | Windows 脚本（智能端口管理） | ❌ 不改 |
-| `proxy.sh` | Linux 脚本（带诊断功能） | ❌ 不改 |
-| `.tunnel-mapping` | 自动生成的 IP→端口映射 | ❌ 自动生成 |
-
----
-
-**一句话：填配置 → 启动（自动清理）→ 传文件夹 → 服务器运行（自动检查）。**
+如有问题，请检查：
+1. 所有前置条件是否满足
+2. 确认在 `server-proxy` 目录下执行命令
+3. 按照 "故障排查" 章节逐步排查
+4. 查看日志：`frpc.log` 或服务器 `/var/log/frps.log`
