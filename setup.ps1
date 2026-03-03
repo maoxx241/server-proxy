@@ -59,61 +59,59 @@ function SetupDockerContainer {
         return
     }
     
-    Info "Setting up proxy for Docker container: $ContainerName"
+    Info "Setting up proxy for Docker container: ${ContainerName}"
     
     # Check if container exists and is running
-    $containerCheck = ssh -p $ServerPort -o StrictHostKeyChecking=no -o LogLevel=ERROR "${ServerUser}@${ServerIP}" "docker ps --format '{{.Names}}' | grep -w $ContainerName" 2>&1
+    $containerCheck = ssh -p $ServerPort -o StrictHostKeyChecking=no -o LogLevel=ERROR "${ServerUser}@${ServerIP}" "docker ps --format '{{.Names}}' | grep -w ${ContainerName}" 2>&1
     if (-not $containerCheck) {
-        Err "Container '$ContainerName' not found or not running"
+        Err "Container '${ContainerName}' not found or not running"
         Info "Available containers:"
         ssh -p $ServerPort -o StrictHostKeyChecking=no -o LogLevel=ERROR "${ServerUser}@${ServerIP}" "docker ps --format '{{.Names}}'"
         return
     }
     
-    # Create proxy scripts inside the container
-    $dockerCmd = @"
-# Check if container has bash or sh
-if docker exec $ContainerName bash -c 'echo test' 2>/dev/null; then
-    SHELL=bash
-elif docker exec $ContainerName sh -c 'echo test' 2>/dev/null; then
-    SHELL=sh
-else
-    echo "ERROR: Container does not have bash or sh"
-    exit 1
-fi
+    # Generate proxy scripts locally (avoid bash syntax issues)
+    $setProxyLines = @(
+        "#!/bin/sh",
+        "export http_proxy=`"http://${ServerIP}:7897`"",
+        "export https_proxy=`"http://${ServerIP}:7897`"",
+        "export HTTP_PROXY=`"http://${ServerIP}:7897`"",
+        "export HTTPS_PROXY=`"http://${ServerIP}:7897`"",
+        "export ALL_PROXY=`"socks5://${ServerIP}:7898`"",
+        "export no_proxy=`"localhost,127.0.0.1,.local`"",
+        "echo `"[OK] Proxy enabled`""
+    )
 
-# Create set-proxy script
-docker exec $ContainerName `$SHELL -c "cat > /usr/local/bin/set-proxy << 'PROXYEOF'
-#!/bin/sh
-export http_proxy=\"http://$ServerIP:7897\"
-export https_proxy=\"http://$ServerIP:7897\"
-export HTTP_PROXY=\"http://$ServerIP:7897\"
-export HTTPS_PROXY=\"http://$ServerIP:7897\"
-export ALL_PROXY=\"socks5://$ServerIP:7898\"
-export no_proxy=\"localhost,127.0.0.1,.local\"
-echo \"[OK] Proxy enabled for container $ContainerName\"
-PROXYEOF"
+    $unsetProxyLines = @(
+        "#!/bin/sh",
+        "unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY no_proxy",
+        "echo `"[OK] Proxy disabled`""
+    )
 
-# Create unset-proxy script
-docker exec $ContainerName `$SHELL -c "cat > /usr/local/bin/unset-proxy << 'PROXYEOF'
-#!/bin/sh
-unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY no_proxy
-echo \"[OK] Proxy disabled for container $ContainerName\"
-PROXYEOF"
-
-# Make scripts executable
-docker exec $ContainerName chmod +x /usr/local/bin/set-proxy /usr/local/bin/unset-proxy
-
-# Verify
-if docker exec $ContainerName test -f /usr/local/bin/set-proxy; then
-    echo "[OK] Proxy scripts installed in container $ContainerName"
-else
-    echo "[ERROR] Failed to install proxy scripts"
-    exit 1
-fi
-"@
+    $tempSet = "$env:TEMP\set-proxy-${ContainerName}"
+    $tempUnset = "$env:TEMP\unset-proxy-${ContainerName}"
     
-    ssh -p $ServerPort -o StrictHostKeyChecking=no -o LogLevel=ERROR "${ServerUser}@${ServerIP}" $dockerCmd
+    [IO.File]::WriteAllText($tempSet, ($setProxyLines -join "`n"))
+    [IO.File]::WriteAllText($tempUnset, ($unsetProxyLines -join "`n"))
+    
+    Info "Uploading scripts to server..."
+    scp -P $ServerPort -o StrictHostKeyChecking=no -o LogLevel=ERROR $tempSet "${ServerUser}@${ServerIP}:/tmp/" 2>$null
+    scp -P $ServerPort -o StrictHostKeyChecking=no -o LogLevel=ERROR $tempUnset "${ServerUser}@${ServerIP}:/tmp/" 2>$null
+    
+    Info "Installing scripts into container..."
+    $installCmdLines = @(
+        "docker cp /tmp/set-proxy-${ContainerName} ${ContainerName}:/usr/local/bin/set-proxy",
+        "docker cp /tmp/unset-proxy-${ContainerName} ${ContainerName}:/usr/local/bin/unset-proxy",
+        "docker exec ${ContainerName} chmod +x /usr/local/bin/set-proxy /usr/local/bin/unset-proxy",
+        "rm -f /tmp/set-proxy-${ContainerName} /tmp/unset-proxy-${ContainerName}",
+        "echo '[OK] Scripts installed'"
+    )
+    $installCmd = $installCmdLines -join "; "
+    
+    ssh -p $ServerPort -o StrictHostKeyChecking=no -o LogLevel=ERROR "${ServerUser}@${ServerIP}" $installCmd
+    
+    Remove-Item $tempSet -ErrorAction SilentlyContinue
+    Remove-Item $tempUnset -ErrorAction SilentlyContinue
     
     Ok "Docker container proxy configured"
     Info ""
